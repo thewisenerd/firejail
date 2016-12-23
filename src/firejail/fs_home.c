@@ -365,10 +365,16 @@ static char *check_dir_or_file(const char *name) {
 		fname = tmp;
 	}
 
-	// we allow only files in user home directory or symbolic links to files or directories owned by the user
+	// we allow files or directories or symbolic links to files or directories owned by the user
 	struct stat s;
 	if (lstat(fname, &s) == 0 && S_ISLNK(s.st_mode)) {
-		if (stat(fname, &s) == 0) {	
+
+		// switch to user and see if stat works
+		EUID_USER();
+		int err = stat(fname, &s);
+		EUID_ROOT();
+
+		if (err == 0) {
 			if (s.st_uid != getuid()) {
 				fprintf(stderr, "Error: symbolic link %s to file or directory not owned by the user\n", fname);
 				exit(1);
@@ -381,25 +387,14 @@ static char *check_dir_or_file(const char *name) {
 		}
 	}
 	else {
-		// check the file is in user home directory, a full home directory is not allowed
+		// a full home directory is not allowed
 		char *rname = realpath(fname, NULL);
 		if (!rname ||
-		    strncmp(rname, cfg.homedir, strlen(cfg.homedir)) != 0 ||
 		    strcmp(rname, cfg.homedir) == 0) {
 			fprintf(stderr, "Error: invalid file %s\n", name);
 			exit(1);
 		}
 		
-		// only top files and directories in user home are allowed
-		char *ptr = rname + strlen(cfg.homedir);
-		assert(*ptr != '\0');
-		ptr = strchr(++ptr, '/');
-		if (ptr) {
-			if (*ptr != '\0') {
-				fprintf(stderr, "Error: only top files and directories in user home are allowed\n");
-				exit(1);
-			}
-		}
 		free(fname);
 		return rname;
 	}
@@ -410,7 +405,7 @@ static void duplicate(char *name) {
 
 	if (arg_debug)
 		printf("Private home: duplicating %s\n", fname);
-	assert(strncmp(fname, cfg.homedir, strlen(cfg.homedir)) == 0);
+	assert(strcmp(fname, cfg.homedir) != 0);
 
 	struct stat s;
 	if (lstat(fname, &s) == -1) {
